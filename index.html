@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Monitoring Invoice</title>
+  
+  <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-database-compat.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    :root {
+      --sidebar-width: 280px; --primary-color: #007bff; --success-color: #28a745;
+      --danger-color: #dc3545; --light-grey: #f8f9fa; --medium-grey: #e9ecef;
+      --dark-grey: #343a40; --text-color: #212529;
+      --warning-bg: #f8d7da; --warning-text: #721c24;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--light-grey); display: flex; height: 100vh; overflow: hidden; color: var(--text-color);
+    }
+    .sidebar {
+      width: var(--sidebar-width); background: var(--dark-grey); color: white; padding: 20px; height: 100%;
+      overflow-y: auto; flex-shrink: 0; transition: margin-left 0.3s ease; position: fixed; left: 0; top: 0; z-index: 1000;
+    }
+    .main {
+      flex-grow: 1; padding: 20px; display: flex; flex-direction: column; height: 100%;
+      transition: margin-left 0.3s ease; overflow-y: auto; margin-left: var(--sidebar-width);
+    }
+    body.sidebar-hidden .sidebar { margin-left: calc(-1 * var(--sidebar-width)); }
+    body.sidebar-hidden .main { margin-left: 0; }
+    .header { display: flex; align-items: center; flex-shrink: 0; margin-bottom: 20px; }
+    .hamburger-btn { font-size: 24px; background: transparent; border: none; color: var(--text-color); cursor: pointer; margin-right: 15px; }
+    .header h2 { margin: 0; flex-grow: 1; font-size: 24px; }
+    .btn { background: var(--primary-color); color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; transition: background-color 0.2s; font-size: 14px; }
+    .btn:hover { opacity: 0.9; }
+    .controls-panel { display: flex; justify-content: space-between; align-items: center; gap: 15px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; flex-wrap: wrap; }
+    #searchInput { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; width: 300px; }
+    .sidebar h3 { margin-top: 0; font-size: 18px; border-bottom: 1px solid #495057; padding-bottom: 10px; margin-bottom: 20px; }
+    .sidebar .settings-section { margin-bottom: 25px; }
+    .sidebar .input-group { display: flex; gap: 5px; margin-top: 10px; }
+    .sidebar input[type="text"], .sidebar input[type="number"] { width: 100%; flex-grow: 1; padding: 8px; border-radius: 4px; border: none; }
+    .sidebar .list-container { list-style: none; padding-left: 0; margin-top: 15px; max-height: 150px; overflow-y: auto; }
+    .sidebar .list-container li { background: #495057; padding: 8px; border-radius: 4px; margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
+    .sidebar .list-container input { background: #f8f9fa; color: var(--text-color); border: none; padding: 5px; border-radius: 3px; flex-grow: 1; }
+    .sidebar .list-container button { background: none; border: none; color: var(--danger-color); cursor: pointer; font-size: 16px; padding: 0 5px; }
+    #report-container p { margin: 8px 0; display: flex; justify-content: space-between; }
+    #report-container b { background-color: #f8f9fa; color: var(--dark-grey); padding: 2px 6px; border-radius: 4px; }
+    .form-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: none; margin-bottom: 20px; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
+    .form-container input, .form-container select { padding: 10px; width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+    .table-wrapper { flex-grow: 1; overflow-x: auto; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 15px; border-bottom: 1px solid var(--medium-grey); text-align: left; white-space: nowrap; }
+    th { background-color: var(--light-grey); position: sticky; top: 0; font-size: 13px; text-transform: uppercase; }
+    td button { background: none; border: none; cursor: pointer; font-size: 16px; padding: 5px; }
+    .overdue { background-color: var(--warning-bg); color: var(--warning-text); font-weight: bold; }
+  </style>
+</head>
+<body class="sidebar-hidden">
+
+  <div class="sidebar">
+    <h3>⚙️ Pengaturan & Laporan</h3>
+    <div class="settings-section">
+      <label for="leadTimeSettingInput"><b>Batas Lead Time (hari)</b></label>
+      <div class="input-group">
+        <input type="number" id="leadTimeSettingInput" value="7" min="1">
+        <button class="btn" id="saveLeadTimeBtn" style="padding: 8px 12px;">Simpan</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>📊 Laporan</h3>
+      <div id="report-container"></div>
+    </div>
+    <div class="settings-section">
+      <h3>📈 Grafik Status</h3>
+      <canvas id="statusChart"></canvas>
+    </div>
+    <div class="settings-section">
+      <label><b>Kelola Status</b></label>
+      <div class="input-group">
+        <input type="text" id="newStatusInput" placeholder="Status Baru"/>
+        <button class="btn" onclick="addStatus()">+</button>
+      </div>
+      <ul id="statusList" class="list-container"></ul>
+    </div>
+    <div class="settings-section">
+      <label><b>Kelola PIC</b></label>
+      <div class="input-group">
+        <input type="text" id="newPicInput" placeholder="PIC Baru"/>
+        <button class="btn" onclick="addPic()">+</button>
+      </div>
+      <ul id="picList" class="list-container"></ul>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="header">
+      <button class="hamburger-btn" onclick="toggleSidebar()">☰</button>
+      <h2>Dashboard Monitoring Invoice</h2>
+    </div>
+    <div class="controls-panel">
+      <input type="search" id="searchInput" placeholder="Cari apa saja...">
+      <button class="btn" onclick="toggleForm(true)">+ Tambah Data</button>
+    </div>
+    <div class="form-container" id="formContainer">
+      <div class="form-grid">
+        <div><label for="invNumber">No. Invoice</label><input type="text" id="invNumber"/></div>
+        <div><label for="vendorName">Nama Vendor</label><input type="text" id="vendorName"/></div>
+        <div><label for="invoiceDate">Tgl. Invoice</label><input type="date" id="invoiceDate"/></div>
+        <div><label for="receivedDate">Tgl. Diterima</label><input type="date" id="receivedDate"/></div>
+        <div><label for="submitDate">Tgl. Submit</label><input type="date" id="submitDate"/></div>
+        <div><label for="paNumber">No. PA</label><input type="text" id="paNumber"/></div>
+        <div><label for="urn">URN</label><input type="text" id="urn"/></div>
+        <div><label for="status">Status</label><select id="status"></select></div>
+        <div><label for="pic">PIC</label><select id="pic"></select></div>
+        <div><label for="paidDate">Tgl. Bayar</label><input type="date" id="paidDate"/></div>
+        <div style="grid-column: 1 / -1;"><label for="remark">Remark</label><input type="text" id="remark"/></div>
+      </div>
+      <div style="margin-top: 20px; display: flex; gap: 10px;">
+        <button class="btn" id="submitBtn" onclick="saveInvoice()">Simpan</button>
+        <button class="btn" onclick="toggleForm(false)" style="background-color: #6c757d;">Batal</button>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table id="invoiceTable">
+        <thead>
+          <tr>
+            <th>No. Invoice</th><th>Vendor</th><th>Tgl. Invoice</th><th>Diterima</th><th>Submit</th>
+            <th>No. PA</th><th>URN</th><th>Status</th><th>Remark</th><th>PIC</th>
+            <th>Lead Time</th>
+            <th>Dibayar</th><th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+// KONFIGURASI FIREBASE ANDA
+const firebaseConfig = {
+  apiKey: "AIzaSyDoznqGMHFKhlp7NuuyKyNW1TDA4U8x7CU",
+  authDomain: "monitoring-invoice-c88f2.firebaseapp.com",
+  databaseURL: "https://monitoring-invoice-c88f2-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "monitoring-invoice-c88f2",
+  storageBucket: "monitoring-invoice-c88f2.firebasestorage.app",
+  messagingSenderId: "992498038377",
+  appId: "1:992498038377:web:dc8914ff9bf955e62d94f8",
+  measurementId: "G-M10RKXWQ2X"
+};
+
+// INISIALISASI FIREBASE
+firebase.initializeApp(firebaseConfig);
+const database = firebase.database();
+
+// VARIABEL GLOBAL
+let allInvoices = []; 
+let editingId = null; 
+let statusOptions = ["RECEIVED", "ON PROCESS", "DONE SUBMIT", "Selesai", "REJECTED", "ON HOLD"];
+let picOptions = ["Logistik", "SPD", "TAX"];
+let leadTimeThreshold = 7;
+let statusChartInstance = null;
+
+// FUNGSI RENDER
+function renderTable() {
+    const searchTerm = document.getElementById("searchInput").value.toLowerCase();
+    const dataToRender = allInvoices.filter(inv => Object.values(inv).some(val => String(val).toLowerCase().includes(searchTerm)));
+
+    const tbody = document.querySelector("#invoiceTable tbody");
+    tbody.innerHTML = "";
+    dataToRender.forEach(invoice => {
+        const row = document.createElement("tr");
+        let leadTimeCellHTML = '<td>-</td>'; 
+        if (invoice.receivedDate) {
+            const startDate = new Date(invoice.receivedDate);
+            const today = new Date();
+            startDate.setHours(0,0,0,0);
+            today.setHours(0,0,0,0);
+            const diffTime = today - startDate;
+            const leadTimeDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            const isOverdue = leadTimeDays > leadTimeThreshold;
+            const isProcessFinished = invoice.paidDate || invoice.status === 'DONE SUBMIT' || invoice.status === 'Selesai';
+            const finalClass = (isOverdue && !isProcessFinished) ? 'overdue' : '';
+            leadTimeCellHTML = `<td class="${finalClass}">${leadTimeDays} hari</td>`;
+        }
+        row.innerHTML = `
+            <td>${invoice.invNumber || ""}</td><td>${invoice.vendorName || ""}</td><td>${invoice.invoiceDate || ""}</td><td>${invoice.receivedDate || ""}</td>
+            <td>${invoice.submitDate || ""}</td><td>${invoice.paNumber || ""}</td><td>${invoice.urn || ""}</td><td>${invoice.status || ""}</td>
+            <td>${invoice.remark || ""}</td><td>${invoice.pic || ""}</td>${leadTimeCellHTML}<td>${invoice.paidDate || "-"}</td>
+            <td><button onclick="editInvoice('${invoice.id}')">✏️</button><button onclick="deleteInvoice('${invoice.id}')">🗑️</button></td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function updateReportAndChart() {
+    const reportContainer = document.getElementById('report-container');
+    const statusCounts = {};
+    allInvoices.forEach(invoice => {
+        const status = invoice.status || 'Tanpa Status';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+    });
+
+    reportContainer.innerHTML = `<p>Total Invoice: <b>${allInvoices.length}</b></p>`;
+    for (const status in statusCounts) {
+        const p = document.createElement('p');
+        p.innerHTML = `${status}: <b>${statusCounts[status]}</b>`;
+        reportContainer.appendChild(p);
+    }
+
+    const ctx = document.getElementById('statusChart').getContext('2d');
+    if (statusChartInstance) statusChartInstance.destroy();
+    statusChartInstance = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: Object.keys(statusCounts),
+            datasets: [{
+                data: Object.values(statusCounts),
+                backgroundColor: ['#007bff', '#ffc107', '#28a745', '#6f42c1', '#dc3545', '#fd7e14'],
+                borderColor: 'rgba(255, 255, 255, 0.8)',
+                borderWidth: 1
+            }]
+        },
+        options: { responsive: true, plugins: { legend: { position: 'top', labels: { color: 'white' } } } }
+    });
+}
+
+function renderManagementLists() {
+    const statusList = document.getElementById("statusList");
+    statusList.innerHTML = "";
+    statusOptions.forEach((status, index) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<input type="text" value="${status}" onchange="updateStatus(${index}, this.value)"><button onclick="deleteStatus(${index})">🗑️</button>`;
+        statusList.appendChild(li);
+    });
+    const picList = document.getElementById("picList");
+    picList.innerHTML = "";
+    picOptions.forEach((pic, index) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<input type="text" value="${pic}" onchange="updatePic(${index}, this.value)"><button onclick="deletePic(${index})">🗑️</button>`;
+        picList.appendChild(li);
+    });
+}
+
+function populateDropdowns() {
+    document.getElementById("status").innerHTML = statusOptions.map(opt => `<option value="${opt}">${opt}</option>`).join("");
+    document.getElementById("pic").innerHTML = picOptions.map(opt => `<option value="${opt}">${opt}</option>`).join("");
+}
+
+// FUNGSI CRUD
+function saveInvoice() {
+    const invoiceData = {
+        invNumber: document.getElementById("invNumber").value, vendorName: document.getElementById("vendorName").value,
+        invoiceDate: document.getElementById("invoiceDate").value, receivedDate: document.getElementById("receivedDate").value,
+        submitDate: document.getElementById("submitDate").value, paNumber: document.getElementById("paNumber").value,
+        urn: document.getElementById("urn").value, status: document.getElementById("status").value,
+        pic: document.getElementById("pic").value, remark: document.getElementById("remark").value,
+        paidDate: document.getElementById("paidDate").value,
+    };
+    if (!invoiceData.invNumber) return alert("Nomor Invoice wajib diisi!");
+    const operation = editingId ? database.ref('invoices/' + editingId).update(invoiceData) : database.ref('invoices').push(invoiceData);
+    operation.then(() => { toggleForm(false); editingId = null; });
+}
+
+function editInvoice(id) {
+    const invoice = allInvoices.find(inv => inv.id === id);
+    if (!invoice) return;
+    editingId = id;
+    for(const key in invoice){
+        const element = document.getElementById(key);
+        if (element) element.value = invoice[key];
+    }
+    // Perbaikan ada di baris ini
+    document.getElementById("submitBtn").textContent = "Simpan Perubahan";
+    toggleForm(true);
+}
+
+function deleteInvoice(id) {
+    if (confirm("Yakin ingin menghapus invoice ini?")) {
+        database.ref('invoices/' + id).remove();
+    }
+}
+
+function addStatus() {
+    const input = document.getElementById("newStatusInput");
+    const newValue = input.value.trim();
+    if (newValue && !statusOptions.includes(newValue)) {
+        statusOptions.push(newValue);
+        database.ref('config/statusOptions').set(statusOptions);
+        input.value = "";
+    }
+}
+function updateStatus(index, value) {
+    statusOptions[index] = value.trim();
+    database.ref('config/statusOptions').set(statusOptions);
+}
+function deleteStatus(index) {
+    statusOptions.splice(index, 1);
+    database.ref('config/statusOptions').set(statusOptions);
+}
+function addPic() {
+    const input = document.getElementById("newPicInput");
+    const newValue = input.value.trim();
+    if (newValue && !picOptions.includes(newValue)) {
+        picOptions.push(newValue);
+        database.ref('config/picOptions').set(picOptions);
+        input.value = "";
+    }
+}
+function updatePic(index, value) {
+    picOptions[index] = value.trim();
+    database.ref('config/picOptions').set(picOptions);
+}
+function deletePic(index) {
+    picOptions.splice(index, 1);
+    database.ref('config/picOptions').set(picOptions);
+}
+
+// FUNGSI BANTUAN UI
+function toggleForm(forceShow = null) {
+    const form = document.getElementById("formContainer");
+    if (forceShow === true || form.style.display !== "block") {
+        form.style.display = "block";
+        if (!editingId) {
+            form.querySelectorAll('input, select').forEach(el => el.value = '');
+            document.getElementById("submitBtn").textContent = "Simpan";
+        }
+    } else {
+        form.style.display = "none";
+        editingId = null;
+    }
+}
+
+function toggleSidebar() {
+    document.body.classList.toggle('sidebar-hidden');
+}
+
+// INISIALISASI HALAMAN
+document.addEventListener("DOMContentLoaded", () => {
+    database.ref('config').on('value', (snapshot) => {
+      const config = snapshot.val() || {};
+      statusOptions = config.statusOptions || statusOptions;
+      picOptions = config.picOptions || picOptions;
+      leadTimeThreshold = config.leadTimeThreshold || leadTimeThreshold;
+      document.getElementById('leadTimeSettingInput').value = leadTimeThreshold;
+      renderManagementLists();
+      populateDropdowns();
+      renderTable();
+    });
+
+    database.ref('invoices').on('value', (snapshot) => {
+      const data = snapshot.val();
+      allInvoices = data ? Object.keys(data).map(key => ({ id: key, ...data[key] })) : [];
+      renderTable();
+      updateReportAndChart();
+    });
+
+    document.getElementById("searchInput").addEventListener("input", renderTable);
+
+    document.getElementById('saveLeadTimeBtn').addEventListener('click', () => {
+        const newThreshold = parseInt(document.getElementById('leadTimeSettingInput').value) || 7;
+        database.ref('config/leadTimeThreshold').set(newThreshold);
+        alert('Batas lead time berhasil disimpan!');
+    });
+});
+</script>
+</body>
+</html>
